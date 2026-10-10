@@ -9,22 +9,25 @@
     "build": "tsc -b && vite build && node scripts/prepare-sw.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --test tests/*.test.mjs",
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "format": "prettier --write src server tests scripts public/*.js *.ts *.json index.html .github/workflows/*.yml",
+    "test:pwa": "npm run build && node scripts/verify-pwa.mjs"
   },
   "dependencies": {
+    "lucide-react": "^0.468.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "lucide-react": "^0.468.0",
     "react-markdown": "^10.1.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "typescript": "^5.8.3",
-    "vite": "^6.3.5",
-    "@vitejs/plugin-react": "^4.4.1",
+    "@playwright/test": "^1.51.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
-    "@playwright/test": "^1.51.0"
+    "@vitejs/plugin-react": "^4.4.1",
+    "prettier": "^3.9.9",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
   },
   "engines": {
     "node": ">=22.12"
