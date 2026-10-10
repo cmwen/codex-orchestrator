@@ -9,7 +9,7 @@ store.data.config.decisionModel ||= process.env.DECISION_MODEL || 'router';
 for (const session of store.data.sessions) session.loaded = false;
 const token = process.env.BRIDGE_TOKEN || generatedToken;
 const codex = new CodexClient({ bin: process.env.CODEX_BIN, url: process.env.CODEX_APP_SERVER_URL, token: process.env.CODEX_APP_SERVER_TOKEN });
-const origins = (process.env.ALLOWED_ORIGINS || 'http://127.0.0.1:5173,http://localhost:5173,https://cmwen.github.io').split(',').map(s => s.trim()).filter(Boolean);
+const origins = (process.env.ALLOWED_ORIGINS || 'http://127.0.0.1:5173,http://localhost:5173,https://cmwen.github.io,https://cmwen.dev,https://www.cmwen.dev').split(',').map(s => s.trim()).filter(Boolean);
 const app = createApp({ store, codex, token, origins, routerKey: process.env.LITELLM_API_KEY });
 const port = Number(process.env.PORT || 4317);
 app.server.listen(port, '127.0.0.1', () => {

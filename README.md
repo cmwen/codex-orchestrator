@@ -2,7 +2,7 @@
 
 An installable GitHub Pages PWA for workspace-aware local Codex sessions. Describe the outcome without choosing a project or model. A decision model on your local LiteLLM router reads registered workspace context, chooses a workspace and execution model, and explains the decision in the session.
 
-**Hosted app:** https://cmwen.github.io/codex-orchestrator/
+**Hosted app:** https://cmwen.dev/codex-orchestrator/
 
 ## Run on your computer
 
