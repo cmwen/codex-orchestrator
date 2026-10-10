@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+.orchestrator/
+test-results/
+playwright-report/
+*.tsbuildinfo

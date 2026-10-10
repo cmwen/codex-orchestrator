@@ -1,0 +1,32 @@
+{
+  "name": "codex-orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "bridge": "node --env-file-if-exists=.env server/index.mjs",
+    "build": "tsc -b && vite build && node scripts/prepare-sw.mjs",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "node --test tests/*.test.mjs",
+    "test:browser": "playwright test"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "lucide-react": "^0.468.0",
+    "react-markdown": "^10.1.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "@vitejs/plugin-react": "^4.4.1",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@playwright/test": "^1.51.0"
+  },
+  "engines": {
+    "node": ">=22.12"
+  }
+}
