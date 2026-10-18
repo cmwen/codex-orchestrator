@@ -1,5 +1,6 @@
-import { chromium } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
+import { chromium } from '@playwright/test';
+
 const browser = await chromium.launch({
   headless: true,
   ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE

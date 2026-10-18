@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
-import { createInterface } from 'node:readline';
 import { EventEmitter } from 'node:events';
+import { createInterface } from 'node:readline';
 import WebSocket from 'ws';
 export class CodexClient extends EventEmitter {
   pending = new Map();
@@ -27,11 +27,12 @@ export class CodexClient extends EventEmitter {
         !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)
       )
         throw new Error('Codex app-server must be on loopback.');
-      const socket = (this.socket = new WebSocket(url, {
+      const socket = new WebSocket(url, {
         headers: this.options.token
           ? { Authorization: `Bearer ${this.options.token}` }
           : {},
-      }));
+      });
+      this.socket = socket;
       socket.on('message', (data) => this.receive(data.toString()));
       socket.on('close', () => this.disconnected('Codex connection closed.'));
       socket.on('error', () =>
@@ -43,11 +44,14 @@ export class CodexClient extends EventEmitter {
       });
       this.send = (value) => socket.send(JSON.stringify(value));
     } else {
-      const child = (this.child = spawn(
+      const child = spawn(
         this.options.bin || 'codex',
         ['app-server', '--listen', 'stdio://'],
-        { stdio: ['pipe', 'pipe', 'pipe'] },
-      ));
+        {
+          stdio: ['pipe', 'pipe', 'pipe'],
+        },
+      );
+      this.child = child;
       child.stdin.on('error', () =>
         this.disconnected('Codex input stream closed.'),
       );
@@ -62,14 +66,14 @@ export class CodexClient extends EventEmitter {
       createInterface({ input: child.stdout }).on('line', (line) =>
         this.receive(line),
       );
-      this.send = (value) => child.stdin.write(JSON.stringify(value) + '\n');
+      this.send = (value) => child.stdin.write(`${JSON.stringify(value)}\n`);
     }
     try {
       await this.request('initialize', {
         clientInfo: {
           name: 'orbit_orchestrator',
           title: 'Orbit',
-          version: '0.1.0',
+          version: '0.2.0',
         },
         capabilities: { experimentalApi: true },
       });

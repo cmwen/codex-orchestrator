@@ -1,35 +1,43 @@
 {
   "name": "codex-orchestrator",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
+    "dev": "vp dev --host 127.0.0.1",
     "bridge": "node --env-file-if-exists=.env server/index.mjs",
-    "build": "tsc -b && vite build && node scripts/prepare-sw.mjs",
-    "preview": "vite preview --host 127.0.0.1",
+    "build": "tsc -b && vp build && node scripts/prepare-sw.mjs",
+    "preview": "vp preview --host 127.0.0.1",
     "test": "node --test tests/*.test.mjs",
     "test:browser": "playwright test",
-    "format": "prettier --write src server tests scripts public/*.js *.ts *.json index.html .github/workflows/*.yml",
-    "test:pwa": "npm run build && node scripts/verify-pwa.mjs"
+    "format": "biome format --write .",
+    "test:pwa": "pnpm build && node scripts/verify-pwa.mjs",
+    "check": "biome check .",
+    "check:fix": "biome check --write ."
   },
   "dependencies": {
-    "lucide-react": "^0.468.0",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
+    "@hono/node-server": "^2.1.5",
+    "effect": "^4.0.5",
+    "hono": "^4.13.13",
+    "ignore": "^7.0.12",
+    "lucide-react": "^1.59.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "react-markdown": "^10.1.0",
-    "ws": "^8.18.0"
+    "ws": "^8.22.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.51.0",
-    "@types/react": "^19.1.0",
-    "@types/react-dom": "^19.1.0",
-    "@vitejs/plugin-react": "^4.4.1",
-    "prettier": "^3.9.9",
-    "typescript": "^5.8.3",
-    "vite": "^6.3.5"
+    "@biomejs/biome": "^2.5.15",
+    "@playwright/test": "^1.64.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "typescript": "^7.0.2",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
   },
   "engines": {
-    "node": ">=22.12"
-  }
+    "node": "^22.18.0 || ^24.11.0 || >=26.0.0"
+  },
+  "packageManager": "pnpm@12.14.0"
 }

@@ -1,5 +1,7 @@
-import { test, expect } from '@playwright/test';
-const state = {
+import { expect, test } from '@playwright/test';
+import type { AppState } from '../../src/types';
+
+const state: AppState = {
   workspaces: [
     {
       id: 'w1',
@@ -42,7 +44,7 @@ test('empty state, settings, mobile layout and workspace navigation', async ({
 test('paired task flow shows results and routing decisions', async ({
   page,
 }) => {
-  let current: any = structuredClone(state);
+  const current = structuredClone(state);
   await page.addInitScript(() => {
     sessionStorage.setItem('orbit-token', 'test-token');
   });
@@ -60,7 +62,7 @@ test('paired task flow shows results and routing decisions', async ({
       });
       return;
     }
-    if (url.pathname === '/api/sessions' && request.method() === 'POST') {
+    if (url.pathname === '/api/messages' && request.method() === 'POST') {
       current.sessions = [
         {
           id: 's1',
@@ -80,6 +82,16 @@ test('paired task flow shows results and routing decisions', async ({
               reason: 'The website workspace owns the requested pages.',
               decisionModel: 'router',
               durationMs: 400,
+              choices: [
+                {
+                  name: 'workspace',
+                  choice: 'w1',
+                  confidence: 0.92,
+                  probabilities: [
+                    { value: 'w1', probability: 1, label: 'Website' },
+                  ],
+                },
+              ],
               sources: ['README.md'],
               decidedAt: new Date().toISOString(),
             },
@@ -130,6 +142,103 @@ test('paired task flow shows results and routing decisions', async ({
   await expect(
     page.getByText('The website workspace owns the requested pages.'),
   ).toBeVisible();
-  await expect(page.getByText('92% confidence')).toBeVisible();
+  await expect(page.getByText('92% confidence', { exact: true })).toBeVisible();
+  await page.getByText('Decisions API evidence', { exact: true }).click();
+  await expect(page.getByText('Website: 100% · selected')).toBeVisible();
   await page.screenshot({ path: 'test-results/session.png', fullPage: true });
+});
+
+test('workspace discovery lets the user register a project and inspect indexed context', async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    sessionStorage.setItem('orbit-token', 'test-token'),
+  );
+  const current = structuredClone(state);
+  let broadcast: ((data: string) => void) | undefined;
+  await page.routeWebSocket('ws://127.0.0.1:4317/events', (socket) => {
+    broadcast = (data) => socket.send(data);
+    socket.onMessage(() =>
+      socket.send(JSON.stringify({ type: 'state', state: current })),
+    );
+  });
+  await page.route('http://127.0.0.1:4317/api/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const headers = {
+      'Access-Control-Allow-Origin': 'http://127.0.0.1:5187',
+      'Access-Control-Allow-Headers': 'Authorization,Content-Type',
+      'Access-Control-Allow-Methods': 'GET,POST,PATCH',
+    };
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({ status: 204, headers });
+      return;
+    }
+    if (url.pathname === '/api/workspaces/scan') {
+      expect(request.postDataJSON()).toEqual({ path: '/tmp/projects' });
+      await route.fulfill({
+        headers,
+        json: {
+          candidates: [
+            { name: 'Payments', path: '/tmp/projects/payments', kind: 'git' },
+          ],
+          truncated: false,
+        },
+      });
+      return;
+    }
+    if (url.pathname === '/api/workspaces' && request.method() === 'POST') {
+      const workspace = {
+        id: 'w2',
+        name: 'Payments',
+        path: '/tmp/projects/payments',
+        documents: [
+          {
+            name: 'docs/ARCHITECTURE.md',
+            text: 'Refund reconciliation ownership.',
+          },
+        ],
+        files: ['src/refunds.ts', 'docs/ARCHITECTURE.md'],
+        context: { bytes: 32, truncated: false },
+        indexedAt: new Date().toISOString(),
+      };
+      current.workspaces.push(workspace);
+      broadcast?.(JSON.stringify({ type: 'state', state: current }));
+      await route.fulfill({ headers, json: workspace });
+      return;
+    }
+    await route.fulfill({ headers, json: current });
+  });
+  await page.goto('/');
+  await expect(
+    page.getByText('Local connected', { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole('button', { name: /Workspaces/ })
+    .first()
+    .click();
+  await page
+    .getByRole('button', { name: 'Add workspace', exact: true })
+    .last()
+    .click();
+  await page.getByLabel('Absolute folder path').fill('/tmp/projects');
+  await page.getByRole('button', { name: 'Scan for projects' }).click();
+  await expect(
+    page.getByText('/tmp/projects/payments', { exact: true }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'Added', exact: true }),
+  ).toBeDisabled();
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  const card = page.locator('.workspace-card').filter({
+    has: page.getByRole('heading', { name: 'Payments', exact: true }),
+  });
+  await card.getByRole('button', { name: 'View routing context' }).click();
+  await expect(
+    card.getByText('src/refunds.ts', { exact: false }),
+  ).toBeVisible();
+  await expect(
+    card.getByText('Refund reconciliation ownership.'),
+  ).toBeVisible();
 });

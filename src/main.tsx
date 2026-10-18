@@ -1,15 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { createRoot } from 'react-dom/client';
 import {
+  Archive,
   ArrowUp,
   ArrowUpRight,
-  Archive,
   Check,
   CheckCheck,
   ChevronRight,
   Circle,
   CircleHelp,
-  Clock3,
   Download,
   FileText,
   Folder,
@@ -31,9 +28,12 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createRoot } from 'react-dom/client';
 import Markdown from 'react-markdown';
-import type { AppState, Approval, Session, Workspace } from './types';
+import type { Approval, AppState, Session, Workspace } from './types';
 import './style.css';
+
 const empty: AppState = {
   workspaces: [],
   sessions: [],
@@ -73,32 +73,40 @@ function App() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
-  const [install, setInstall] = useState<any>(null);
+  const [install, setInstall] = useState<
+    (Event & { prompt: () => Promise<void> }) | null
+  >(null);
   const [showActivity, setShowActivity] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState('');
   const [workspaceFilter, setWorkspaceFilter] = useState<string | null>(null);
   const end = useRef<HTMLDivElement>(null);
   const session = state.sessions.find((s) => s.id === selected);
-  async function api(
-    path: string,
-    method = 'GET',
-    body?: unknown,
-    pair = connection,
-  ) {
-    const response = await fetch(`${pair.url.replace(/\/$/, '')}/api${path}`, {
-      method,
-      headers: {
-        Authorization: `Bearer ${pair.token}`,
-        'Content-Type': 'application/json',
-      },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-      signal: AbortSignal.timeout(40000),
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Request failed.');
-    return data;
-  }
+  const api = useCallback(
+    async function api(
+      path: string,
+      method = 'GET',
+      body?: unknown,
+      pair = connection,
+    ) {
+      const response = await fetch(
+        `${pair.url.replace(/\/$/, '')}/api${path}`,
+        {
+          method,
+          headers: {
+            Authorization: `Bearer ${pair.token}`,
+            'Content-Type': 'application/json',
+          },
+          ...(body ? { body: JSON.stringify(body) } : {}),
+          signal: AbortSignal.timeout(40000),
+        },
+      );
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Request failed.');
+      return data;
+    },
+    [connection],
+  );
   async function action(path: string, method: string, body?: unknown) {
     try {
       setError('');
@@ -153,27 +161,28 @@ function App() {
       clearTimeout(timer);
       socket?.close();
     };
-  }, [connection]);
+  }, [connection, api]);
   useEffect(() => {
     const handler = (event: Event) => {
       event.preventDefault();
-      setInstall(event);
+      setInstall(event as Event & { prompt: () => Promise<void> });
     };
     window.addEventListener('beforeinstallprompt', handler);
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
+  const scrollKey = `${session?.id}:${session?.messages.length}:${session?.status}`;
   useEffect(() => {
-    end.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [session?.messages.length, session?.status, selected]);
+    if (scrollKey)
+      end.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [scrollKey]);
   async function send(event: React.FormEvent) {
     event.preventDefault();
     if (!message.trim() || sending) return;
     setSending(true);
-    const result = await action(
-      session ? `/sessions/${session.id}/message` : '/sessions',
-      'POST',
-      { message },
-    );
+    const result = await action('/messages', 'POST', {
+      message,
+      ...(session ? { sessionId: session.id } : {}),
+    });
     if (result) {
       setSelected(result.id);
       setView('home');
@@ -200,17 +209,18 @@ function App() {
   return (
     <div className="app">
       <aside className="sidebar">
-        <button className="brand" onClick={newTask}>
+        <button type="button" className="brand" onClick={newTask}>
           <Orbit />
           <span>
             orbit<span className="brand-caption">CODEX ORCHESTRATOR</span>
           </span>
         </button>
-        <button className="primary new-task" onClick={newTask}>
+        <button type="button" className="primary new-task" onClick={newTask}>
           <Plus size={17} /> New task <kbd>↗</kbd>
         </button>
         <div className="nav-label">YOUR SPACE</div>
         <button
+          type="button"
           className={`nav ${view === 'home' && !workspaceFilter ? 'chosen' : ''}`}
           onClick={() => {
             setView('home');
@@ -222,6 +232,7 @@ function App() {
           <span>{state.sessions.filter((s) => !s.archived).length}</span>
         </button>
         <button
+          type="button"
           className={`nav ${view === 'workspaces' ? 'chosen' : ''}`}
           onClick={() => {
             setView('workspaces');
@@ -232,6 +243,7 @@ function App() {
           <span>{state.workspaces.length}</span>
         </button>
         <button
+          type="button"
           className={`nav ${view === 'archive' ? 'chosen' : ''}`}
           onClick={() => {
             setView('archive');
@@ -244,6 +256,7 @@ function App() {
         <div className="nav-label workspace-label">
           WORKSPACES{' '}
           <button
+            type="button"
             className="icon"
             aria-label="Add workspace"
             onClick={() => (connected ? setAdding(true) : setSettings(true))}
@@ -254,6 +267,7 @@ function App() {
         <div className="workspace-nav">
           {state.workspaces.map((w, i) => (
             <button
+              type="button"
               key={w.id}
               className={`nav ${workspaceFilter === w.id ? 'chosen' : ''}`}
               onClick={() => {
@@ -291,11 +305,16 @@ function App() {
               </span>
             </div>
           </div>
-          <button className="nav" onClick={() => setSettings(true)}>
+          <button
+            type="button"
+            className="nav"
+            onClick={() => setSettings(true)}
+          >
             <Settings2 size={17} /> Settings <ChevronRight size={14} />
           </button>
           {install && (
             <button
+              type="button"
               className="nav"
               onClick={async () => {
                 await install.prompt();
@@ -306,7 +325,7 @@ function App() {
             </button>
           )}
           <div className="sidebar-footer">
-            Built around your work <span>v0.1</span>
+            Built around your work <span>v0.2</span>
           </div>
         </div>
       </aside>
@@ -334,6 +353,7 @@ function App() {
               {connected ? 'Local connected' : 'Not connected'}
             </span>
             <button
+              type="button"
               className="icon"
               aria-label="Connection settings"
               onClick={() => setSettings(true)}
@@ -346,6 +366,7 @@ function App() {
           <div className="error-banner" role="alert">
             {error}
             <button
+              type="button"
               className="icon"
               aria-label="Dismiss error"
               onClick={() => setError('')}
@@ -374,6 +395,7 @@ function App() {
                 </div>
                 <div className="heading-actions">
                   <button
+                    type="button"
                     className="icon"
                     aria-label="Rename session"
                     onClick={() => {
@@ -385,6 +407,7 @@ function App() {
                   </button>
                   {active(session) ? (
                     <button
+                      type="button"
                       className="secondary"
                       onClick={() =>
                         action(`/sessions/${session.id}/interrupt`, 'POST', {})
@@ -394,6 +417,7 @@ function App() {
                     </button>
                   ) : (
                     <button
+                      type="button"
                       className="secondary"
                       onClick={() =>
                         action(`/sessions/${session.id}`, 'PATCH', {
@@ -508,6 +532,31 @@ function App() {
                         </span>
                       </div>
                       <p>{d.reason}</p>
+                      {d.choices && (
+                        <details className="decision-evidence">
+                          <summary>Decisions API evidence</summary>
+                          {d.choices.map((choice) => (
+                            <div key={choice.name}>
+                              <strong>
+                                {choice.name} ·{' '}
+                                {Math.round(choice.confidence * 100)}%
+                                confidence
+                              </strong>
+                              <ul>
+                                {choice.probabilities.map((p) => (
+                                  <li key={p.value}>
+                                    {p.label || p.value}:{' '}
+                                    {Math.round(p.probability * 100)}%
+                                    {p.value === choice.choice
+                                      ? ' · selected'
+                                      : ''}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ))}
+                        </details>
+                      )}
                       <div className="decision-meta">
                         <span>{d.effort} effort</span>
                         <span>Decided by {d.decisionModel}</span>
@@ -515,7 +564,7 @@ function App() {
                         <span>
                           {d.sources.length
                             ? `Read ${d.sources.join(' + ')}`
-                            : 'No root context files'}
+                            : 'No context documents'}
                         </span>
                       </div>
                     </div>
@@ -540,6 +589,7 @@ function App() {
                   </p>
                 </div>
                 <button
+                  type="button"
                   className="primary"
                   onClick={() =>
                     connected ? setAdding(true) : setSettings(true)
@@ -562,10 +612,11 @@ function App() {
                     <FolderOpen size={36} />
                     <h2>A little context goes a long way.</h2>
                     <p>
-                      Add a local folder. Its README and AGENTS.md help Orbit
-                      understand what belongs there.
+                      Add a local folder. Its documentation and project
+                      structure help Orbit understand what belongs there.
                     </p>
                     <button
+                      type="button"
                       className="secondary"
                       onClick={() =>
                         connected ? setAdding(true) : setSettings(true)
@@ -630,6 +681,7 @@ function App() {
                         </span>
                       </div>
                       <button
+                        type="button"
                         className="secondary"
                         onClick={() => setSettings(true)}
                       >
@@ -650,6 +702,7 @@ function App() {
                         </span>
                       </div>
                       <button
+                        type="button"
                         className="secondary"
                         onClick={() => setAdding(true)}
                       >
@@ -709,6 +762,7 @@ function App() {
               <div className="session-list">
                 {sessions.map((s) => (
                   <button
+                    type="button"
                     className="session-row"
                     key={s.id}
                     onClick={() => {
@@ -824,6 +878,9 @@ function App() {
       {adding && (
         <AddWorkspace
           close={() => setAdding(false)}
+          scan={async (value) =>
+            api('/workspaces/scan', 'POST', { path: value })
+          }
           add={async (value) => {
             await api('/workspaces', 'POST', value);
           }}
@@ -845,13 +902,14 @@ function App() {
             <label>
               Session name
               <input
-                autoFocus
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
               />
             </label>
-            <button className="primary full">Save name</button>
+            <button type="submit" className="primary full">
+              Save name
+            </button>
           </form>
         </Modal>
       )}
@@ -916,6 +974,7 @@ function Composer({
         <div>
           <kbd>⌘ / Ctrl ↵</kbd>
           <button
+            type="submit"
             className="send"
             disabled={disabled || !message.trim()}
             aria-label="Send task"
@@ -934,7 +993,7 @@ function WorkspaceCard({
 }: {
   workspace: Workspace;
   index: number;
-  action: (p: string, m: string, b?: unknown) => Promise<any>;
+  action: (p: string, m: string, b?: unknown) => Promise<unknown>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [remove, setRemove] = useState(false);
@@ -946,6 +1005,7 @@ function WorkspaceCard({
         </span>
         <div>
           <button
+            type="button"
             className="icon"
             aria-label={`Refresh ${w.name}`}
             onClick={() => action(`/workspaces/${w.id}/refresh`, 'POST', {})}
@@ -953,6 +1013,7 @@ function WorkspaceCard({
             <RefreshCw size={15} />
           </button>
           <button
+            type="button"
             className="icon"
             aria-label={`Remove ${w.name}`}
             onClick={() => setRemove(true)}
@@ -970,12 +1031,25 @@ function WorkspaceCard({
             {d.name}
           </span>
         ))}
-        {!w.documents.length && <span>No root README or AGENTS.md found</span>}
+        {!w.documents.length && <span>No routing documentation found</span>}
       </div>
-      <button className="text-button" onClick={() => setExpanded(!expanded)}>
+      <button
+        type="button"
+        className="text-button"
+        onClick={() => setExpanded(!expanded)}
+      >
         {expanded ? 'Hide routing context' : 'View routing context'}
         <ChevronRight size={14} />
       </button>
+      {expanded && w.files && (
+        <details open>
+          <summary>
+            Indexed structure · {w.files.length} paths
+            {w.context?.truncated ? ' (bounded scan)' : ''}
+          </summary>
+          <pre>{w.files.join('\n')}</pre>
+        </details>
+      )}
       {expanded &&
         w.documents.map((d) => (
           <details key={d.name} open>
@@ -989,10 +1063,15 @@ function WorkspaceCard({
             Remove this workspace from routing? Files and sessions stay on your
             computer.
           </p>
-          <button className="secondary" onClick={() => setRemove(false)}>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => setRemove(false)}
+          >
             Cancel
           </button>
           <button
+            type="button"
             className="danger"
             onClick={() => action(`/workspaces/${w.id}`, 'DELETE')}
           >
@@ -1050,12 +1129,7 @@ function Modal({
     };
   }, []);
   return (
-    <div
-      className="modal-backdrop"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) close();
-      }}
-    >
+    <div role="presentation" className="modal-backdrop">
       <div
         ref={box}
         className="modal"
@@ -1065,7 +1139,12 @@ function Modal({
       >
         <div className="modal-heading">
           <h2 id="modal-title">{title}</h2>
-          <button className="icon" aria-label="Close dialog" onClick={close}>
+          <button
+            type="button"
+            className="icon"
+            aria-label="Close dialog"
+            onClick={close}
+          >
             <X size={19} />
           </button>
         </div>
@@ -1077,24 +1156,49 @@ function Modal({
 function AddWorkspace({
   close,
   add,
+  scan,
 }: {
   close: () => void;
   add: (v: { name: string; path: string }) => Promise<void>;
+  scan: (path: string) => Promise<{
+    candidates: { name: string; path: string; kind: string }[];
+    truncated: boolean;
+  }>;
 }) {
   const [name, setName] = useState(''),
     [path, setPath] = useState(''),
     [error, setError] = useState(''),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    [candidates, setCandidates] = useState<
+      { name: string; path: string; kind: string }[] | null
+    >(null),
+    [truncated, setTruncated] = useState(false),
+    [added, setAdded] = useState<string[]>([]);
+  async function search() {
+    setBusy(true);
+    setError('');
+    try {
+      const result = await scan(path);
+      setCandidates(result.candidates);
+      setTruncated(result.truncated);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <Modal title="Add a workspace" close={close}>
       <p className="modal-description">
-        Choose a folder on the computer running your companion. Orbit reads its
-        root README and AGENTS.md to route future tasks.
+        Add a project directly, or scan a parent folder to discover local
+        repositories and projects. Documentation, package summaries, and file
+        structure provide routing context.
       </p>
       <form
         onSubmit={async (e) => {
           e.preventDefault();
           setBusy(true);
+          setError('');
           try {
             await add({ name, path });
             close();
@@ -1117,25 +1221,83 @@ function AddWorkspace({
           Absolute folder path
           <input
             value={path}
-            onChange={(e) => setPath(e.target.value)}
-            placeholder="/home/you/projects/website"
+            onChange={(e) => {
+              setPath(e.target.value);
+              setCandidates(null);
+            }}
+            placeholder="/home/you/projects"
             required
           />
         </label>
-        {error && (
-          <p className="form-error" role="alert">
-            {error}
-          </p>
-        )}
-        <button className="primary full" disabled={busy}>
-          {busy ? (
-            <Loader2 className="spin" size={16} />
-          ) : (
-            <FolderOpen size={16} />
-          )}{' '}
-          Read context & add workspace
-        </button>
+        <div className="workspace-add-actions">
+          <button
+            type="button"
+            className="secondary"
+            disabled={busy || !path}
+            onClick={search}
+          >
+            <Search size={15} />
+            Scan for projects
+          </button>
+          <button type="submit" className="primary" disabled={busy || !path}>
+            {busy ? (
+              <Loader2 className="spin" size={15} />
+            ) : (
+              <FolderOpen size={15} />
+            )}{' '}
+            Add this folder
+          </button>
+        </div>
       </form>
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
+      {candidates && (
+        <div className="scan-results">
+          <h3>Discovered projects</h3>
+          {!candidates.length && (
+            <p>
+              No repository or project manifests found. You can add the folder
+              directly.
+            </p>
+          )}
+          {candidates.map((candidate) => (
+            <div key={candidate.path}>
+              <span>
+                <strong>{candidate.name}</strong>
+                <code>{candidate.path}</code>
+              </span>
+              <button
+                type="button"
+                className="secondary"
+                disabled={busy || added.includes(candidate.path)}
+                onClick={async () => {
+                  setBusy(true);
+                  setError('');
+                  try {
+                    await add(candidate);
+                    setAdded((previous) => [...previous, candidate.path]);
+                  } catch (e) {
+                    setError((e as Error).message);
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                {added.includes(candidate.path) ? 'Added' : 'Add'}
+              </button>
+            </div>
+          ))}
+          {truncated && (
+            <p>
+              Scan limit reached. Choose a more specific folder to discover more
+              projects.
+            </p>
+          )}
+        </div>
+      )}
     </Modal>
   );
 }
@@ -1161,6 +1323,10 @@ function SettingsModal({
     [error, setError] = useState(''),
     [note, setNote] = useState(''),
     [busy, setBusy] = useState(false);
+  useEffect(() => {
+    setRouterUrl(config.routerUrl);
+    setDecisionModel(config.decisionModel);
+  }, [config.routerUrl, config.decisionModel]);
   async function run(fn: () => Promise<void>, success: string) {
     setError('');
     setNote('');
@@ -1182,7 +1348,7 @@ function SettingsModal({
           <h3>Local companion</h3>
         </div>
         <p className="modal-description">
-          Run <code>npm run bridge</code> from this repository on your computer.
+          Run <code>pnpm bridge</code> from this repository on your computer.
           Copy the pairing token from the terminal.
         </p>
         <form
@@ -1214,7 +1380,7 @@ function SettingsModal({
               placeholder="Paste from your local terminal"
             />
           </label>
-          <button className="primary full" disabled={busy}>
+          <button type="submit" className="primary full" disabled={busy}>
             Connect companion <ArrowUpRight size={16} />
           </button>
         </form>
@@ -1229,8 +1395,9 @@ function SettingsModal({
           <h3>Decision routing</h3>
         </div>
         <p className="modal-description">
-          Use your local LiteLLM router to choose a workspace and a Codex model.
-          Provider keys belong in the companion’s .env file.
+          Use the Decisions API on your local LiteLLM router to choose a
+          workspace, then a Codex model and reasoning effort. Provider keys
+          belong in the companion’s .env file.
         </p>
         <form
           onSubmit={(e) => {
@@ -1242,7 +1409,7 @@ function SettingsModal({
           }}
         >
           <label>
-            LiteLLM base URL
+            LiteLLM Decisions API base URL
             <input
               type="url"
               value={routerUrl}
@@ -1260,6 +1427,7 @@ function SettingsModal({
             />
           </label>
           <button
+            type="submit"
             className="secondary full"
             disabled={busy || !connection.token}
           >
@@ -1279,6 +1447,7 @@ function SettingsModal({
       )}
       {connection.token && (
         <button
+          type="button"
           className="text-button"
           onClick={() => {
             disconnect();
@@ -1296,7 +1465,7 @@ function ApprovalCard({
   respond,
 }: {
   approval: Approval;
-  respond: (v: unknown) => Promise<any>;
+  respond: (v: unknown) => Promise<unknown>;
 }) {
   const [answers, setAnswers] = useState<Record<string, string>>({}),
     [busy, setBusy] = useState(false);
@@ -1324,10 +1493,11 @@ function ApprovalCard({
         </p>
       )}
       {a.params.questions?.map((q) => (
-        <label key={q.id}>
+        <label key={q.id} htmlFor={`answer-${a.id}-${q.id}`}>
           {q.question}
           {q.options?.length ? (
             <select
+              id={`answer-${a.id}-${q.id}`}
               value={answers[q.id] || ''}
               onChange={(e) =>
                 setAnswers({ ...answers, [q.id]: e.target.value })
@@ -1342,6 +1512,7 @@ function ApprovalCard({
             </select>
           ) : (
             <input
+              id={`answer-${a.id}-${q.id}`}
               type={q.isSecret ? 'password' : 'text'}
               value={answers[q.id] || ''}
               onChange={(e) =>
@@ -1354,6 +1525,7 @@ function ApprovalCard({
       <div className="approval-actions">
         {a.params.questions ? (
           <button
+            type="button"
             disabled={busy}
             className="primary"
             onClick={() => answer({ id: a.id, answers })}
@@ -1365,6 +1537,7 @@ function ApprovalCard({
             {(!a.params.availableDecisions ||
               a.params.availableDecisions.includes('decline')) && (
               <button
+                type="button"
                 disabled={busy}
                 className="secondary"
                 onClick={() => answer({ id: a.id, decision: 'decline' })}
@@ -1375,6 +1548,7 @@ function ApprovalCard({
             {(!a.params.availableDecisions ||
               a.params.availableDecisions.includes('accept')) && (
               <button
+                type="button"
                 disabled={busy}
                 className="primary"
                 onClick={() => answer({ id: a.id, decision: 'accept' })}
@@ -1383,6 +1557,7 @@ function ApprovalCard({
               </button>
             )}
             <button
+              type="button"
               disabled={busy}
               className="secondary"
               onClick={() => answer({ id: a.id, decision: 'cancel' })}
@@ -1396,7 +1571,9 @@ function ApprovalCard({
   );
 }
 
-createRoot(document.getElementById('root')!).render(
+const mount = document.getElementById('root');
+if (!mount) throw new Error('Application root is missing.');
+createRoot(mount).render(
   <React.StrictMode>
     <App />
   </React.StrictMode>,

@@ -9,7 +9,7 @@ export default defineConfig({
       : {},
   },
   webServer: {
-    command: 'npm run dev -- --port 5187 --strictPort',
+    command: 'pnpm dev --port 5187 --strictPort',
     url: 'http://127.0.0.1:5187',
     reuseExistingServer: process.env.ORBIT_REUSE_PREVIEW === '1',
   },

@@ -1,5 +1,6 @@
-import { readFile, writeFile, readdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
+
 const assets = (await readdir('dist/assets')).map((file) => `assets/${file}`);
 const html = await readFile('dist/index.html', 'utf8');
 const version = createHash('sha256').update(html).digest('hex').slice(0, 12);

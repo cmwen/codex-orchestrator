@@ -1,7 +1,8 @@
 import path from 'node:path';
-import { Store } from './store.mjs';
-import { CodexClient } from './codex.mjs';
 import { createApp, localRouterUrl } from './app.mjs';
+import { CodexClient } from './codex.mjs';
+import { Store } from './store.mjs';
+
 const store = new Store(path.resolve(process.env.DATA_DIR || '.orchestrator'));
 const generatedToken = await store.load();
 store.data.config.routerUrl ||= localRouterUrl(

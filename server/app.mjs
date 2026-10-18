@@ -1,8 +1,10 @@
-import http from 'node:http';
-import { createHash, timingSafeEqual, randomUUID } from 'node:crypto';
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createAdaptorServer } from '@hono/node-server';
+import { Hono } from 'hono';
 import { WebSocketServer } from 'ws';
-import { describeWorkspace } from './workspaces.mjs';
-import { decide } from './router.mjs';
+import { routeTask } from './orchestration.mjs';
+import { describeWorkspace, discoverWorkspaces } from './workspaces.mjs';
+
 const busy = (s) => ['routing', 'running', 'waiting'].includes(s.status);
 const hash = (value) =>
   createHash('sha256')
@@ -28,17 +30,23 @@ export function localRouterUrl(value) {
   return url.href.replace(/\/$/, '');
 }
 async function body(req) {
-  let data = '';
-  for await (const chunk of req) {
-    data += chunk;
-    if (Buffer.byteLength(data) > 65536) throw new Error('Request too large.');
-  }
+  let data = '',
+    size = 0;
+  const decoder = new TextDecoder();
+  if (req.body)
+    for await (const chunk of req.body) {
+      size += chunk.byteLength;
+      if (size > 65536) throw new Error('Request too large.');
+      data += decoder.decode(chunk, { stream: true });
+    }
+  data += decoder.decode();
   try {
     return JSON.parse(data || '{}');
   } catch {
     throw new Error('Invalid JSON request.');
   }
 }
+
 export function createApp({
   store,
   codex,
@@ -49,6 +57,7 @@ export function createApp({
 }) {
   const state = store.data;
   const clients = new Set();
+  const routingRuns = new Map();
   let persistTimer;
   const snapshot = () => ({
     ...state,
@@ -188,24 +197,27 @@ export function createApp({
     update();
   });
   async function dispatch(s, message) {
+    const controller = new AbortController();
+    routingRuns.set(s.id, controller);
     try {
       const registered = s.workspaceId
         ? state.workspaces.filter((w) => w.id === s.workspaceId)
         : [...state.workspaces];
-      const workspaces = await Promise.all(
-        registered.map((w) => describeWorkspace(w)),
-      );
-      const models = await codex.models();
-      const decision = await decide({
+      const { workspaces, decision } = await routeTask({
+        registered,
         message,
-        workspaces,
-        models,
+        codex,
         config: { ...state.config, routerKey },
         fixedWorkspace: s.workspaceId,
         history: s.messages.slice(0, -1),
         fetchImpl,
+        signal: controller.signal,
       });
-      if (s.status !== 'routing') return;
+      for (const workspace of workspaces) {
+        const index = state.workspaces.findIndex((w) => w.id === workspace.id);
+        if (index !== -1) state.workspaces[index] = workspace;
+      }
+      if (controller.signal.aborted || s.status !== 'routing') return;
       const workspace = workspaces.find((w) => w.id === decision.workspaceId);
       if (!state.workspaces.some((w) => w.id === workspace.id))
         throw new Error(
@@ -241,7 +253,7 @@ export function createApp({
         s.threadId = result.thread.id;
       }
       s.loaded = true;
-      if (s.status !== 'routing') {
+      if (controller.signal.aborted || s.status !== 'routing') {
         await commit();
         return;
       }
@@ -257,56 +269,45 @@ export function createApp({
       if (busy(s)) s.turnId = result.turn.id;
       await commit();
     } catch (error) {
-      if (s.status === 'interrupted') return;
+      if (controller.signal.aborted || s.status === 'interrupted') return;
       s.status = 'failed';
       s.error = error.message;
       s.turnId = null;
       clearApprovals(s);
       await commit();
+    } finally {
+      if (routingRuns.get(s.id) === controller) routingRuns.delete(s.id);
     }
   }
-  const server = http.createServer(async (req, res) => {
-    const origin = req.headers.origin;
-    const host = req.headers.host?.split(':')[0];
-    if (!['localhost', '127.0.0.1'].includes(host)) {
-      res.writeHead(403);
-      res.end('Invalid host');
-      return;
+  const hono = new Hono();
+  hono.use('*', async (c, next) => {
+    const origin = c.req.header('Origin');
+    const host = c.req.header('Host')?.split(':')[0];
+    if (!['localhost', '127.0.0.1'].includes(host))
+      return c.json({ error: 'Invalid host' }, 403);
+    if (origin && !origins.includes(origin))
+      return c.json({ error: 'Origin not allowed' }, 403);
+    if (origin) c.header('Access-Control-Allow-Origin', origin);
+    c.header('Vary', 'Origin');
+    c.header('Cache-Control', 'no-store');
+    if (c.req.method === 'OPTIONS') {
+      c.header('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+      c.header('Access-Control-Allow-Headers', 'Authorization,Content-Type');
+      c.header('Access-Control-Allow-Private-Network', 'true');
+      return c.body(null, 204);
     }
-    if (origin && !origins.includes(origin)) {
-      res.writeHead(403);
-      res.end('Origin not allowed');
-      return;
-    }
-    if (origin) res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Vary', 'Origin');
-    res.setHeader('Cache-Control', 'no-store');
-    if (req.method === 'OPTIONS') {
-      res.setHeader(
-        'Access-Control-Allow-Methods',
-        'GET,POST,PATCH,DELETE,OPTIONS',
+    if (!equal(c.req.header('Authorization'), `Bearer ${token}`))
+      return c.json(
+        { error: 'Pair with the companion token from your local terminal.' },
+        401,
       );
-      res.setHeader(
-        'Access-Control-Allow-Headers',
-        'Authorization,Content-Type',
-      );
-      res.setHeader('Access-Control-Allow-Private-Network', 'true');
-      res.writeHead(204);
-      res.end();
-      return;
-    }
-    const reply = (status, value) => {
-      res.writeHead(status, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(value));
-    };
-    if (!equal(req.headers.authorization, `Bearer ${token}`)) {
-      reply(401, {
-        error: 'Pair with the companion token from your local terminal.',
-      });
-      return;
-    }
+    await next();
+  });
+  hono.all('/api/*', async (c) => {
+    const req = c.req.raw;
+    const reply = (status, value) => c.json(value, status);
     try {
-      const url = new URL(req.url, 'http://127.0.0.1');
+      const url = new URL(req.url);
       if (req.method === 'GET' && url.pathname === '/api/state')
         return reply(200, snapshot());
       if (req.method === 'GET' && url.pathname === '/api/models') {
@@ -328,6 +329,10 @@ export function createApp({
         };
         await commit();
         return reply(200, snapshot());
+      }
+      if (req.method === 'POST' && url.pathname === '/api/workspaces/scan') {
+        const input = await body(req);
+        return reply(200, await discoverWorkspaces(input.path));
       }
       if (req.method === 'POST' && url.pathname === '/api/workspaces') {
         const w = await describeWorkspace(await body(req));
@@ -359,12 +364,29 @@ export function createApp({
           return reply(200, { ok: true });
         }
       }
-      if (req.method === 'POST' && url.pathname === '/api/sessions') {
+      if (
+        req.method === 'POST' &&
+        ['/api/sessions', '/api/messages'].includes(url.pathname)
+      ) {
         const input = await body(req);
         const message = String(input.message || '').trim();
         if (!message || message.length > 16000)
           throw new Error('Enter a task of up to 16,000 characters.');
         if (!state.workspaces.length) throw new Error('Add a workspace first.');
+        if (input.sessionId !== undefined) {
+          const s = sessionById(input.sessionId);
+          if (busy(s) || s.archived)
+            throw new Error(
+              'Wait for or stop the active session, and restore archived sessions before continuing.',
+            );
+          s.status = 'routing';
+          s.error = null;
+          s.messages.push({ id: randomUUID(), role: 'user', text: message });
+          await commit();
+          const response = reply(202, s);
+          void dispatch(s, message);
+          return response;
+        }
         const now = new Date().toISOString();
         const s = {
           id: randomUUID(),
@@ -382,15 +404,16 @@ export function createApp({
         };
         state.sessions.unshift(s);
         await commit();
-        reply(202, s);
+        const response = reply(202, s);
         void dispatch(s, message);
-        return;
+        return response;
       }
       const match = url.pathname.match(
         /^\/api\/sessions\/([^/]+)(?:\/(message|interrupt|approval))?$/,
       );
       if (match) {
         const s = sessionById(decodeURIComponent(match[1]));
+        if (req.method === 'GET' && !match[2]) return reply(200, s);
         const input = await body(req);
         if (req.method === 'PATCH' && !match[2]) {
           if (input.title !== undefined) {
@@ -420,12 +443,13 @@ export function createApp({
           s.error = null;
           s.messages.push({ id: randomUUID(), role: 'user', text: message });
           await commit();
-          reply(202, s);
+          const response = reply(202, s);
           void dispatch(s, message);
-          return;
+          return response;
         }
         if (req.method === 'POST' && match[2] === 'interrupt') {
           if (s.status === 'routing') {
+            routingRuns.get(s.id)?.abort();
             s.status = 'interrupted';
             await commit();
             return reply(200, s);
@@ -471,11 +495,13 @@ export function createApp({
           return reply(200, { ok: true });
         }
       }
-      reply(404, { error: 'Not found.' });
+      return reply(404, { error: 'Not found.' });
     } catch (error) {
-      reply(400, { error: error.message });
+      return reply(400, { error: error.message });
     }
   });
+  hono.onError((error, c) => c.json({ error: error.message }, 400));
+  const server = createAdaptorServer({ fetch: hono.fetch });
   const wss = new WebSocketServer({ noServer: true, maxPayload: 65536 });
   server.on('upgrade', (req, socket, head) => {
     const host = req.headers.host?.split(':')[0];
@@ -511,9 +537,11 @@ export function createApp({
     });
   });
   return {
+    app: hono,
     server,
     snapshot,
     async close() {
+      for (const controller of routingRuns.values()) controller.abort();
       clearTimeout(persistTimer);
       for (const client of clients) client.close();
       wss.close();

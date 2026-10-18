@@ -4,6 +4,9 @@ export type Workspace = {
   path: string;
   documents: { name: string; text: string }[];
   indexedAt: string;
+  files?: string[];
+  repository?: { kind: string; manifests: string[] };
+  context?: { bytes: number; truncated: boolean };
 };
 export type Decision = {
   workspaceId: string;
@@ -16,6 +19,13 @@ export type Decision = {
   durationMs: number;
   sources: string[];
   decidedAt: string;
+  decisionApi?: string;
+  choices?: {
+    name: string;
+    choice: string;
+    confidence: number;
+    probabilities: { value: string; probability: number; label?: string }[];
+  }[];
 };
 export type Approval = {
   id: number;

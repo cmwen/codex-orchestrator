@@ -1,8 +1,9 @@
-import http from 'node:http';
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import http from 'node:http';
+import path from 'node:path';
 import { chromium } from '@playwright/test';
+
 const prefix = '/codex-orchestrator/';
 const types = {
   '.html': 'text/html',
@@ -52,6 +53,11 @@ try {
   const context = await browser.newContext();
   const page = await context.newPage();
   const errors = [];
+  const remoteRequests = [];
+  page.on('request', (request) => {
+    if (new URL(request.url()).origin !== new URL(url).origin)
+      remoteRequests.push(request.url());
+  });
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(url);
   await page
@@ -59,7 +65,7 @@ try {
     .waitFor();
   await page.evaluate(() => navigator.serviceWorker.ready);
   const manifest = await (
-    await context.request.get(url + 'manifest.webmanifest')
+    await context.request.get(`${url}manifest.webmanifest`)
   ).json();
   assert.equal(manifest.display, 'standalone');
   for (const icon of manifest.icons) {
@@ -71,6 +77,11 @@ try {
     .getByRole('heading', { name: 'What are we working on?' })
     .waitFor();
   assert.deepEqual(errors, []);
+  assert.deepEqual(
+    remoteRequests,
+    [],
+    'PWA must not fetch fonts, icons, or scripts from a CDN',
+  );
   console.log(
     'Passed: repository subpath, service-worker activation, install manifest/icons, and offline reload.',
   );
